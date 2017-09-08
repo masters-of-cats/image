@@ -4,25 +4,29 @@ import (
 	"context"
 	"io"
 	"io/ioutil"
+	"net/http"
 	"os"
+	"strconv"
 
 	"github.com/containers/image/types"
 	"github.com/opencontainers/go-digest"
 	imgspecv1 "github.com/opencontainers/image-spec/specs-go/v1"
+	"github.com/pkg/errors"
 )
 
 type ociImageSource struct {
 	ref        ociReference
+	httpClient *http.Client
 	descriptor imgspecv1.Descriptor
 }
 
 // newImageSource returns an ImageSource for reading from an existing directory.
-func newImageSource(ref ociReference) (types.ImageSource, error) {
+func newImageSource(ctx *types.SystemContext, ref ociReference) (types.ImageSource, error) {
 	descriptor, err := ref.getManifestDescriptor()
 	if err != nil {
 		return nil, err
 	}
-	return &ociImageSource{ref: ref, descriptor: descriptor}, nil
+	return &ociImageSource{ref: ref, httpClient: &http.Client{}, descriptor: descriptor}, nil
 }
 
 // Reference returns the reference used to set up this source.
@@ -68,8 +72,40 @@ func (s *ociImageSource) GetTargetManifest(digest digest.Digest) ([]byte, string
 	return m, imgspecv1.MediaTypeImageManifest, nil
 }
 
+func (s *ociImageSource) getExternalBlob(urls []string) (io.ReadCloser, int64, error) {
+	var (
+		resp *http.Response
+		err  error
+	)
+	for _, url := range urls {
+		resp, err = s.httpClient.Get(url)
+		if err == nil {
+			if resp.StatusCode != http.StatusOK {
+				err = errors.Errorf("error fetching external blob from %q: %d", url, resp.StatusCode)
+				continue
+			}
+		}
+	}
+	if resp.Body != nil && err == nil {
+		return resp.Body, getBlobSize(resp), nil
+	}
+	return nil, 0, err
+}
+
+func getBlobSize(resp *http.Response) int64 {
+	size, err := strconv.ParseInt(resp.Header.Get("Content-Length"), 10, 64)
+	if err != nil {
+		size = -1
+	}
+	return size
+}
+
 // GetBlob returns a stream for the specified blob, and the blob's size.
 func (s *ociImageSource) GetBlob(info types.BlobInfo) (io.ReadCloser, int64, error) {
+	if len(info.URLs) != 0 {
+		return s.getExternalBlob(info.URLs)
+	}
+
 	path, err := s.ref.blobPath(info.Digest)
 	if err != nil {
 		return nil, 0, err

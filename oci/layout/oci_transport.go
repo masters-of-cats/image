@@ -182,7 +182,7 @@ func (ref ociReference) PolicyConfigurationNamespaces() []string {
 // NOTE: If any kind of signature verification should happen, build an UnparsedImage from the value returned by NewImageSource,
 // verify that UnparsedImage, and convert it into a real Image via image.FromUnparsedImage.
 func (ref ociReference) NewImage(ctx *types.SystemContext) (types.Image, error) {
-	src, err := newImageSource(ref)
+	src, err := newImageSource(ctx, ref)
 	if err != nil {
 		return nil, err
 	}
@@ -246,7 +246,7 @@ func LoadManifestDescriptor(imgRef types.ImageReference) (imgspecv1.Descriptor, 
 // nil requestedManifestMIMETypes means manifest.DefaultRequestedManifestMIMETypes.
 // The caller must call .Close() on the returned ImageSource.
 func (ref ociReference) NewImageSource(ctx *types.SystemContext, requestedManifestMIMETypes []string) (types.ImageSource, error) {
-	return newImageSource(ref)
+	return newImageSource(ctx, ref)
 }
 
 // NewImageDestination returns a types.ImageDestination for this reference.
