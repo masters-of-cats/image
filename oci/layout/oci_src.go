@@ -2,14 +2,18 @@ package layout
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"io"
 	"io/ioutil"
+	"log"
 	"net/http"
 	"os"
 	"strconv"
 
 	"github.com/containers/image/types"
-	"github.com/opencontainers/go-digest"
+	"github.com/levigross/grequests"
+	digest "github.com/opencontainers/go-digest"
 	imgspecv1 "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/pkg/errors"
 )
@@ -74,11 +78,40 @@ func (s *ociImageSource) GetTargetManifest(digest digest.Digest) ([]byte, string
 
 func (s *ociImageSource) getExternalBlob(urls []string) (io.ReadCloser, int64, error) {
 	var (
-		resp *http.Response
+		resp *grequests.Response
 		err  error
 	)
+
+	cert, err := tls.LoadX509KeyPair("assets/cert/cert.pem", "assets/cert/key.pem")
+	if err != nil {
+		log.Fatalln("Unable to load cert", err)
+	}
+
+	// Load our CA certificate
+	clientCACert, err := ioutil.ReadFile("assets/cert/cert.pem")
+	if err != nil {
+		log.Fatal("Unable to open cert", err)
+	}
+
+	clientCertPool := x509.NewCertPool()
+	clientCertPool.AppendCertsFromPEM(clientCACert)
+
+	tlsConfig := &tls.Config{
+		Certificates: []tls.Certificate{cert},
+		RootCAs:      clientCertPool,
+	}
+
+	tlsConfig.BuildNameToCertificate()
+
+	ro := &grequests.RequestOptions{
+		HTTPClient: &http.Client{
+			Transport: &http.Transport{TLSClientConfig: tlsConfig},
+		},
+	}
+
 	for _, url := range urls {
-		resp, err = s.httpClient.Get(url)
+		resp, err = grequests.Get(url, ro)
+		// panic(fmt.Sprintf("%#v", resp.RawResponse))
 		if err == nil {
 			if resp.StatusCode != http.StatusOK {
 				err = errors.Errorf("error fetching external blob from %q: %d", url, resp.StatusCode)
@@ -86,8 +119,8 @@ func (s *ociImageSource) getExternalBlob(urls []string) (io.ReadCloser, int64, e
 			}
 		}
 	}
-	if resp.Body != nil && err == nil {
-		return resp.Body, getBlobSize(resp), nil
+	if resp.RawResponse.Body != nil && err == nil {
+		return resp.RawResponse.Body, getBlobSize(resp.RawResponse), nil
 	}
 	return nil, 0, err
 }
