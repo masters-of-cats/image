@@ -124,7 +124,9 @@ func newTransport() *http.Transport {
 		Dial:                direct.Dial,
 		TLSHandshakeTimeout: 10 * time.Second,
 		// TODO(dmcgowan): Call close idle connections when complete and use keep alive
-		DisableKeepAlives: true,
+		DisableKeepAlives: false,
+		IdleConnTimeout:   90 * time.Second,
+		MaxIdleConns:      100,
 	}
 	proxyDialer, err := sockets.DialerFromEnvironment(direct)
 	if err == nil {
